@@ -3,9 +3,12 @@
 //! Provides header compression observation without modifying transmitted packets.
 //! Useful for measuring potential SCHC compression gains in simulated networks.
 
-use schc::{
-    build_tree, compress_packet, Direction, FieldContext, RuleSet, TreeNode, Rule,
-};
+use pnet_packet::ip::IpNextHeaderProtocol;
+use pnet_packet::ipv4::MutableIpv4Packet;
+use pnet_packet::udp::MutableUdpPacket;
+use pnet_packet::{ipv4, udp};
+use schc::{build_tree, compress_packet, Direction, FieldContext, Rule, RuleSet, TreeNode};
+use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -76,15 +79,22 @@ impl SchcObserver {
     }
 
     /// Observe compression for a UDP payload (QUIC packet)
-    /// 
+    ///
     /// This does NOT modify the packet - it only measures potential compression.
-    /// The udp_payload is the actual QUIC packet data from Quinn workbench.
-    pub fn observe(&self, quic_payload: &[u8], is_outgoing: bool) {
+    /// The quic_payload is the actual QUIC packet data from Quinn workbench.
+    /// source_addr and dest_addr are the actual simulation addresses.
+    pub fn observe(
+        &self,
+        quic_payload: &[u8],
+        source_addr: SocketAddr,
+        dest_addr: SocketAddr,
+        is_outgoing: bool,
+    ) {
         self.stats.packets_processed.fetch_add(1, Ordering::Relaxed);
-        
-        // Build a synthetic Ethernet+IPv4+UDP frame around the QUIC payload
-        // This is required because the SCHC parser expects a full packet stack
-        let synthetic_packet = self.build_synthetic_packet(quic_payload);
+
+        // Build a proper Ethernet+IPv4+UDP frame around the QUIC payload
+        // using the actual simulation addresses (like pcap_exporter does)
+        let synthetic_packet = self.build_synthetic_packet(quic_payload, source_addr, dest_addr);
         
         let direction = if is_outgoing {
             Direction::Up
@@ -95,19 +105,32 @@ impl SchcObserver {
         let packet_num = self.stats.packets_processed.load(Ordering::Relaxed);
 
         if self.debug {
-            let dir_str = if is_outgoing { "OUT" } else { "IN" };
+            let dir_str = if is_outgoing { "UP" } else { "DOWN" };
             println!("\n╔══════════════════════════════════════════════════════════════════════════════");
-            println!("║ [SCHC] Packet {} [{}] - QUIC payload: {} bytes", packet_num, dir_str, quic_payload.len());
-            println!("║ QUIC first byte: 0x{:02x} ({})", 
-                     quic_payload.get(0).copied().unwrap_or(0),
-                     if quic_payload.get(0).map(|b| b & 0x80 != 0).unwrap_or(false) { 
-                         "Long Header" 
-                     } else { 
-                         "Short Header" 
-                     });
+            println!(
+                "║ [SCHC] Packet {} [{}] - QUIC payload: {} bytes",
+                packet_num, dir_str, quic_payload.len()
+            );
+            println!("║ {} → {}", source_addr, dest_addr);
+            println!(
+                "║ QUIC first byte: 0x{:02x} ({})",
+                quic_payload.get(0).copied().unwrap_or(0),
+                if quic_payload
+                    .get(0)
+                    .map(|b| b & 0x80 != 0)
+                    .unwrap_or(false)
+                {
+                    "Long Header"
+                } else {
+                    "Short Header"
+                }
+            );
             if quic_payload.len() >= 5 {
                 let version = u32::from_be_bytes([
-                    quic_payload[1], quic_payload[2], quic_payload[3], quic_payload[4]
+                    quic_payload[1],
+                    quic_payload[2],
+                    quic_payload[3],
+                    quic_payload[4],
                 ]);
                 println!("║ QUIC version: 0x{:08x}", version);
             }
@@ -163,53 +186,71 @@ impl SchcObserver {
         }
     }
 
-    /// Build a synthetic packet for SCHC parsing
-    /// 
+    /// Build a packet for SCHC parsing using actual simulation addresses.
+    ///
     /// The SCHC parser expects full Ethernet+IP+UDP frames.
-    /// We create a minimal synthetic frame around the QUIC payload.
-    /// 
-    /// Note: The IP/UDP headers are synthetic - only the QUIC header fields
-    /// will match against QUIC-specific rules.
-    fn build_synthetic_packet(&self, quic_payload: &[u8]) -> Vec<u8> {
-        let mut packet = Vec::with_capacity(14 + 20 + 8 + quic_payload.len());
-        
+    /// We construct proper headers using pnet_packet (same approach as pcap_exporter).
+    fn build_synthetic_packet(
+        &self,
+        quic_payload: &[u8],
+        source_addr: SocketAddr,
+        dest_addr: SocketAddr,
+    ) -> Vec<u8> {
+        // Extract IPv4 addresses (simulation only uses IPv4)
+        let IpAddr::V4(source_ip) = source_addr.ip() else {
+            panic!("SCHC observer only supports IPv4");
+        };
+        let IpAddr::V4(dest_ip) = dest_addr.ip() else {
+            panic!("SCHC observer only supports IPv4");
+        };
+
+        // Use a working buffer (similar to pcap_exporter)
+        let mut buffer = vec![0u8; 2000];
+
+        // Build UDP packet first
+        let udp_packet_length = 8 + quic_payload.len() as u16;
+        {
+            let mut udp_writer = MutableUdpPacket::new(&mut buffer).unwrap();
+            udp_writer.set_source(source_addr.port());
+            udp_writer.set_destination(dest_addr.port());
+            udp_writer.set_length(udp_packet_length);
+            udp_writer.set_payload(quic_payload);
+            let checksum = udp::ipv4_checksum(&udp_writer.to_immutable(), &source_ip, &dest_ip);
+            udp_writer.set_checksum(checksum);
+        }
+        let udp_packet = buffer[0..udp_packet_length as usize].to_vec();
+
+        // Build IPv4 packet with UDP as payload
+        let ip_packet_length = 20 + udp_packet_length;
+        {
+            let mut ip_writer = MutableIpv4Packet::new(&mut buffer).unwrap();
+            ip_writer.set_version(4);
+            ip_writer.set_header_length(5); // No options
+            ip_writer.set_dscp(0);
+            ip_writer.set_ecn(0);
+            ip_writer.set_total_length(ip_packet_length);
+            ip_writer.set_identification(0);
+            ip_writer.set_flags(0b010); // Don't fragment
+            ip_writer.set_fragment_offset(0);
+            ip_writer.set_ttl(64);
+            ip_writer.set_next_level_protocol(IpNextHeaderProtocol::new(17)); // UDP
+            ip_writer.set_source(source_ip);
+            ip_writer.set_destination(dest_ip);
+            ip_writer.set_payload(&udp_packet);
+            let checksum = ipv4::checksum(&ip_writer.to_immutable());
+            ip_writer.set_checksum(checksum);
+        }
+        let ip_packet = buffer[0..ip_packet_length as usize].to_vec();
+
+        // Build final frame with Ethernet header
+        let mut frame = Vec::with_capacity(14 + ip_packet.len());
         // Ethernet header (14 bytes)
-        packet.extend_from_slice(&[
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // Dst MAC
-            0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  // Src MAC
-            0x08, 0x00,                          // EtherType (IPv4)
-        ]);
-        
-        // IPv4 header (20 bytes)
-        let total_length = (20 + 8 + quic_payload.len()) as u16;
-        packet.extend_from_slice(&[
-            0x45,                                // Version + IHL
-            0x00,                                // DSCP + ECN
-            (total_length >> 8) as u8,           // Total length (high)
-            (total_length & 0xFF) as u8,         // Total length (low)
-            0x00, 0x00,                          // Identification
-            0x40, 0x00,                          // Flags + Fragment offset
-            0x40,                                // TTL
-            0x11,                                // Protocol (UDP)
-            0x00, 0x00,                          // Checksum (ignored)
-            0xC0, 0xA8, 0x00, 0x01,              // Src IP (192.168.0.1)
-            0xC0, 0xA8, 0x00, 0x02,              // Dst IP (192.168.0.2)
-        ]);
-        
-        // UDP header (8 bytes)
-        let udp_length = (8 + quic_payload.len()) as u16;
-        packet.extend_from_slice(&[
-            0x11, 0x51,                          // Src port (4433 = QUIC alt)
-            0x01, 0xBB,                          // Dst port (443 = HTTPS/QUIC)
-            (udp_length >> 8) as u8,
-            (udp_length & 0xFF) as u8,
-            0x00, 0x00,                          // Checksum (ignored)
-        ]);
-        
-        // QUIC payload (this is the actual data from Quinn)
-        packet.extend_from_slice(quic_payload);
-        
-        packet
+        frame.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00]); // Dst MAC (placeholder)
+        frame.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x00, 0x00]); // Src MAC (placeholder)
+        frame.extend_from_slice(&[0x08, 0x00]); // EtherType: IPv4
+        frame.extend_from_slice(&ip_packet);
+
+        frame
     }
 
     /// Get statistics

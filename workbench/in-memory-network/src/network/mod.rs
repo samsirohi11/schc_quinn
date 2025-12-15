@@ -457,9 +457,24 @@ impl InMemoryNetwork {
                 None => current_node.udp_endpoint.is_none(), // Default: all routers
             };
             if should_observe {
-                // Direction: outgoing if going away from source
-                let is_outgoing = true; // Simplified for now
-                observer.observe(&data.transmit.contents, is_outgoing);
+                // Direction based on IP addresses:
+                // Earth (192.168.40.x) → Moon (192.168.41.x) = OUT (Up)
+                // Moon (192.168.41.x) → Earth (192.168.40.x) = IN (Down)
+                let src_ip = data.source_endpoint.addr.ip();
+                let dst_ip = data.transmit.destination.ip();
+                let is_outgoing = match (src_ip, dst_ip) {
+                    (std::net::IpAddr::V4(src), std::net::IpAddr::V4(dst)) => {
+                        // Compare second octet: 40 = Earth, 41 = Moon
+                        src.octets()[2] < dst.octets()[2]
+                    }
+                    _ => true, // Default to outgoing for IPv6 or mixed
+                };
+                observer.observe(
+                    &data.transmit.contents,
+                    data.source_endpoint.addr,
+                    data.transmit.destination,
+                    is_outgoing,
+                );
             }
         }
 

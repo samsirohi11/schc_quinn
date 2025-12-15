@@ -105,19 +105,7 @@ The SCHC observer operates in **read-only mode**:
 - **Measures compression potential**: Calculates what compression would achieve if applied
 - **Tracks statistics**: Aggregates packet counts, original/compressed sizes, and savings
 
-#### 3. Synthetic Packet Construction
-
-The Quinn workbench only provides raw QUIC payloads (the UDP payload portion). The SCHC parser, however, expects full protocol stacks. The observer bridges this gap:
-
-```rust
-fn build_synthetic_packet(&self, quic_payload: &[u8]) -> Vec<u8> {
-    // Constructs: Ethernet (14 bytes) + IPv4 (20 bytes) + UDP (8 bytes) + QUIC payload
-    // The IP/UDP headers are synthetic placeholders
-    // Only QUIC header fields are matched against compression rules
-}
-```
-
-#### 4. Node Selection
+#### 3. Node Selection
 
 SCHC observation can be limited to specific nodes:
 
@@ -127,7 +115,7 @@ SCHC observation can be limited to specific nodes:
 | `--schc-nodes Node1,Node2`  | Observe at Node1 and Node2      |
 | _(no --schc-nodes)_         | Observe at **all router nodes** |
 
-By default, only **router nodes** are observed (nodes without UDP endpoints), simulating where compression would typically occur in a DTN architecture.
+By default, only **router nodes** are observed (nodes without UDP endpoints).
 
 ### Data Flow Diagram
 
