@@ -6,8 +6,8 @@ A Rust implementation of SCHC (Static Context Header Compression) integrated wit
 
 This project combines two components:
 
-1. **SCHC Compressor** (`schc/`) - A streaming, rule-based header compression engine supporting IPv4/IPv6/UDP/QUIC
-2. **Quinn Workbench** (`workbench/`) - An in-memory QUIC network simulator with time warping for deep-space RTT scenarios
+1. **SCHC Compressor** (`schc/`) - A streaming, rule-based header compression engine supporting IPv4/IPv6/UDP/QUIC (github: [SCHC](https://github.com/samsirohi11/schc_r_c))
+2. **Quic Workbench** (`workbench/`) - An in-memory QUIC network simulator with time warping for deep-space RTT scenarios (github: [Quic Workbench](https://github.com/deepspaceip/dipt-quic-workbench))
 
 The integration enables **observer mode** compression analysis: measuring potential SCHC compression gains on QUIC traffic without modifying the actual packets (since decompression isn't yet implemented).
 
@@ -26,8 +26,8 @@ cargo run --release --features schc-observer --bin quinn-workbench -- quic \
   --server-ip-address 192.168.41.2 \
   --requests 3 \
   --schc-observer \
-  --schc-rules ../schc/rules/quic_test.json \
-  --schc-field-context ../schc/rules/field-context.json \
+  --schc-rules ../schc/quic_test.json \
+  --schc-field-context ../schc/field-context.json \
   --schc-nodes MoonOrbiter1
 
 # Enable verbose debug output to see rule matching
