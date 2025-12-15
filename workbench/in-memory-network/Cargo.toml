@@ -1,0 +1,38 @@
+[package]
+name = "in-memory-network"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+rt-tokio = ["dep:tokio", "quinn/runtime-tokio"]
+
+# Note: this async runtime is highly experimental and not guaranteed to return correct results
+rt-custom = ["dep:sittard"]
+
+# SCHC observer mode for compression analysis
+schc-observer = ["dep:schc_r_c"]
+
+[dependencies]
+anyhow.workspace = true
+async-lock.workspace = true
+cfg-if.workspace = true
+event-listener.workspace = true
+fastrand.workspace = true
+futures.workspace = true
+futures-util.workspace = true
+parking_lot.workspace = true
+pcap-file.workspace = true
+pin-project-lite.workspace = true
+pnet_packet.workspace = true
+quinn.workspace = true
+uuid.workspace = true
+serde.workspace = true
+serde_with.workspace = true
+schc_r_c = { path = "../../schc", optional = true }
+sittard = { workspace = true, optional = true }
+thiserror.workspace = true
+tokio = { workspace = true, optional = true }
+
+[dev-dependencies]
+bon.workspace = true
+rcgen.workspace = true

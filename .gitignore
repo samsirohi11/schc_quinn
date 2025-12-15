@@ -1,0 +1,31 @@
+# Build artifacts
+**/target/
+
+# Cargo lock (optional - some prefer to track this)
+**/Cargo.lock
+
+# Generated files from simulation
+**/*.pcap
+!**/test-data/**/*.pcap
+!**/*.pcapng
+**/replay-log.json
+**/keylog.key
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Rust
+*.pdb
+*.rlib
+*.rmeta
+
+# Logs
+**/*.log
