@@ -11,6 +11,164 @@ This project combines two components:
 
 The integration enables **observer mode** compression analysis: measuring potential SCHC compression gains on QUIC traffic without modifying the actual packets (since decompression isn't yet implemented).
 
+---
+
+## How SCHC Integrates with Quinn Workbench
+
+### Integration Point in the Pipeline
+
+The SCHC observer is integrated into the **packet forwarding layer** of the in-memory network simulation. For a detailed understanding of the workbench architecture, see [Quinn Workbench Architecture](workbench/quinn_workbench_architecture.md).
+
+SCHC compression analysis occurs at a specific point in the packet flow:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        PACKET FLOW WITH SCHC OBSERVER                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   Quinn Endpoint                                                            │
+│        │                                                                    │
+│        ▼                                                                    │
+│   InMemoryUdpSocket.try_send()                                              │
+│        │                                                                    │
+│        ▼                                                                    │
+│   InMemoryNetwork.forward(source_node, InTransitData)                       │
+│        │                                                                    │
+│        ├──────────────────────────────────────────────────────┐             │
+│        |                                                      │             │
+│   ┌─────────────────────────────────────────────────────┐     │             │
+│   │           SCHC OBSERVER INTERCEPT POINT             │◄────┘             │
+│   │                                                     │                   │
+│   │  if schc_observer enabled AND node in enabled_nodes │                   │
+│   │       │                                             │                   │
+│   │       ▼                                             │                   │
+│   │  observer.observe(quic_payload, direction)          │                   │
+│   │       │                                             │                   │
+│   │       ├─► Build synthetic Ethernet+IP+UDP frame     │                   │
+│   │       │   around QUIC payload                       │                   │
+│   │       │                                             │                   │
+│   │       ├─► Match against SCHC rule tree              │                   │
+│   │       │                                             │                   │
+│   │       └─► Accumulate compression statistics         │                   │
+│   │                                                     │                   │
+│   └─────────────────────────────────────────────────────┘                   │
+│        │                                                                    │
+│        ▼                                                                    │
+│   Resolve link → Enqueue to outbound buffer                                 │
+│        │                                                                    │
+│        ▼                                                                    │
+│   NetworkLink.send() → Packet delivered after delay                         │
+│        │                                                                    │
+│        ▼                                                                    │
+│   Next node's forward() [SCHC observer may run again]                       │
+│        │                                                                    │
+│        ▼                                                                    │
+│   Destination host receives packet                                          │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Implementation Details
+
+#### 1. Location in Code
+
+The SCHC observer is invoked in [`in-memory-network/src/network/mod.rs`](workbench/in-memory-network/src/network/mod.rs) within the `forward()` method:
+
+```rust
+pub(crate) fn forward(
+    self: &Arc<InMemoryNetwork>,
+    current_node: Arc<Node>,
+    data: InTransitData,
+) {
+    self.tracer.track_packet_in_node(&current_node, &data);
+
+    // SCHC Observer: analyze compression potential at router nodes
+    #[cfg(feature = "schc-observer")]
+    if let Some(ref observer) = *self.schc_observer.read() {
+        let should_observe = match &*self.schc_enabled_nodes.read() {
+            Some(nodes) => nodes.contains(&current_node.id),
+            None => current_node.udp_endpoint.is_none(), // Default: all routers
+        };
+        if should_observe {
+            observer.observe(&data.transmit.contents, is_outgoing);
+        }
+    }
+    // ... continue forwarding
+}
+```
+
+#### 2. Observer Mode Behavior
+
+The SCHC observer operates in **read-only mode**:
+
+- **Does NOT modify packets**: The actual `InTransitData` is forwarded unchanged
+- **Measures compression potential**: Calculates what compression would achieve if applied
+- **Tracks statistics**: Aggregates packet counts, original/compressed sizes, and savings
+
+#### 3. Synthetic Packet Construction
+
+The Quinn workbench only provides raw QUIC payloads (the UDP payload portion). The SCHC parser, however, expects full protocol stacks. The observer bridges this gap:
+
+```rust
+fn build_synthetic_packet(&self, quic_payload: &[u8]) -> Vec<u8> {
+    // Constructs: Ethernet (14 bytes) + IPv4 (20 bytes) + UDP (8 bytes) + QUIC payload
+    // The IP/UDP headers are synthetic placeholders
+    // Only QUIC header fields are matched against compression rules
+}
+```
+
+#### 4. Node Selection
+
+SCHC observation can be limited to specific nodes:
+
+| Configuration               | Behavior                        |
+| --------------------------- | ------------------------------- |
+| `--schc-nodes MoonOrbiter1` | Only observe at MoonOrbiter1    |
+| `--schc-nodes Node1,Node2`  | Observe at Node1 and Node2      |
+| _(no --schc-nodes)_         | Observe at **all router nodes** |
+
+By default, only **router nodes** are observed (nodes without UDP endpoints), simulating where compression would typically occur in a DTN architecture.
+
+### Data Flow Diagram
+
+For reference, here's how packets flow through the complete workbench (per the [architecture document](workbench/quinn_workbench_architecture.md)):
+
+```mermaid
+sequenceDiagram
+    participant Q as Quinn Endpoint
+    participant S as InMemoryUdpSocket
+    participant N as InMemoryNetwork
+    participant SCHC as SCHC Observer
+    participant Node as Node Buffer
+    participant L as NetworkLink
+    participant D as Destination
+
+    Q->>S: try_send(Transmit)
+    S->>N: forward(source, InTransitData)
+    N->>SCHC: observe(quic_payload) if enabled
+    Note over SCHC: Matches rules, tracks stats<br/>(does not modify packet)
+    N->>Node: enqueue_outbound()
+    Node->>L: send(data, extra_delay)
+    Note over L: Delay simulation
+    L->>N: forward(dest_node, data)
+    N->>SCHC: observe() again if router
+    N->>D: inbound.send(data)
+    D->>Q: poll_recv returns packet
+```
+
+### Statistics Collected
+
+The `SchcObserver` tracks:
+
+| Statistic               | Description                                        |
+| ----------------------- | -------------------------------------------------- |
+| `packets_processed`     | Total packets seen by the observer                 |
+| `packets_matched`       | Packets that matched at least one SCHC rule        |
+| `total_original_bits`   | Sum of original header sizes (IP+UDP+QUIC)         |
+| `total_compressed_bits` | Sum of compressed header sizes (rule ID + residue) |
+
+---
+
 ## Quick Start
 
 ```bash
@@ -60,11 +218,13 @@ schc_quinn/
 └── workbench/                   # Quinn QUIC simulator
     ├── Cargo.toml
     ├── in-memory-network/       # Network simulation layer
-    │   └── src/schc_observer.rs # SCHC integration module
+    │   └── src/
+    │       ├── schc_observer.rs # SCHC integration module ◄── Key file
+    │       └── network/mod.rs   # forward() with SCHC hook
     ├── quinn-workbench/         # CLI application
     ├── test-data/               # Network scenarios
     │   └── earth-moon/          # Earth-Moon communication
-    └── quinn_workbench_architecture.md  # Detailed docs
+    └── quinn_workbench_architecture.md  # Detailed architecture docs
 ```
 
 ## SCHC CLI Options
@@ -93,9 +253,17 @@ schc_quinn/
 * Compression savings: 0 bits (0.0%, ratio 0.96:1)
 ```
 
-## Architecture
+## Architecture Reference
 
-See [Quinn Workbench Architecture](workbench/quinn_workbench_architecture.md) for detailed documentation on the simulation engine.
+For complete details on the Quinn Workbench simulation engine, including:
+
+- **InMemoryNetwork** structure and initialization
+- **Node** types (hosts vs routers)
+- **NetworkLink** parameters (delay, bandwidth, failure injection)
+- **Time warping** for deep-space RTT simulation
+- **Packet flow** through the simulated network
+
+See: [**Quinn Workbench Architecture**](workbench/quinn_workbench_architecture.md)
 
 ## Status
 
