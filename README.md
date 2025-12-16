@@ -208,8 +208,7 @@ schc_quinn/
 │   │   ├── matcher.rs           # Matching operators (MOs)
 │   │   ├── tree.rs              # Rule tree building
 │   │   └── streaming_tree.rs    # Unified parse+match+compress
-│   ├── quic_rules.json          # Full QUIC compression rules
-│   ├── quic_test.json           # Simplified test rules
+│   ├── quic_rules.json          # QUIC compression rules (version field)
 │   └── field-context.json       # Field size definitions
 │
 └── workbench/                   # Quinn QUIC simulator
