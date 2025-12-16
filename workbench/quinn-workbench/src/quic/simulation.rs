@@ -61,6 +61,33 @@ impl QuicSimulation {
 
         // Network check
         let network_spec: NetworkSpec = network_config.network_graph.into();
+
+        // Validate SCHC nodes early before any network setup
+        #[cfg(feature = "schc-observer")]
+        if quic_options.schc_observer {
+            if let Some(ref node_ids) = quic_options.schc_nodes {
+                let available_node_ids: Vec<&str> = network_spec.nodes.iter()
+                    .map(|n| n.id.as_str())
+                    .collect();
+                
+                let mut invalid_nodes = Vec::new();
+                for node_id in node_ids {
+                    if !available_node_ids.contains(&node_id.as_str()) {
+                        invalid_nodes.push(node_id.as_str());
+                    }
+                }
+                
+                if !invalid_nodes.is_empty() {
+                    bail!(
+                        "Invalid SCHC node(s) specified: [{}]\n\
+                         Available nodes in the network graph: [{}]",
+                        invalid_nodes.join(", "),
+                        available_node_ids.join(", ")
+                    );
+                }
+            }
+        }
+
         let network_events = NetworkEvents::new(
             network_config
                 .network_events
@@ -139,6 +166,8 @@ impl QuicSimulation {
 
             // Configure enabled nodes if specified
             if let Some(ref node_ids) = quic_options.schc_nodes {
+                // Node validation already done earlier
+                
                 println!("* Enabled nodes: {}", node_ids.join(", "));
                 let nodes: HashSet<Arc<str>> = node_ids
                     .iter()

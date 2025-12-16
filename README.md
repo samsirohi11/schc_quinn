@@ -159,6 +159,15 @@ The `SchcObserver` tracks:
 
 ## Quick Start
 
+First make sure you have [rust installed](https://rust-lang.org/tools/install).
+
+```bash
+# Clone the repo and the submodule (schc compressor)
+git clone --recurse-submodules https://github.com/samsirohi11/schc_quinn.git
+# Or if already cloned:
+git submodule update --init --recursive
+```
+
 ```bash
 # Build with SCHC observer support
 cd workbench
