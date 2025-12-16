@@ -93,6 +93,15 @@ pub struct QuicOpt {
     #[arg(long, default_value_t = false)]
     pub schc_debug: bool,
 
+    /// Enable SCHC compression mode (actually compress/decompress packets)
+    #[arg(long, default_value_t = false)]
+    pub schc_compress: bool,
+
+    /// Node IDs where SCHC compression is active (comma-separated, e.g., "SchcNode1,SchcNode2")
+    /// These nodes will compress packets going UP and decompress packets going DOWN
+    #[arg(long, value_delimiter = ',')]
+    pub schc_compress_nodes: Option<Vec<String>>,
+
     #[command(flatten)]
     pub network: NetworkOpt,
 }

@@ -11,6 +11,9 @@ mod util;
 #[cfg(feature = "schc-observer")]
 pub mod schc_observer;
 
+#[cfg(feature = "schc-compressor")]
+pub mod schc_compressor;
+
 use crate::network::node::UdpEndpoint;
 use std::sync::Arc;
 use transmit::OwnedTransmit;

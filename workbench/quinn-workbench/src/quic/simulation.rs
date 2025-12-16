@@ -129,6 +129,9 @@ impl QuicSimulation {
 
         // Network
         let tracer = Arc::new(SimulationStepTracer::new(network_spec.clone()));
+        // Clone for later SCHC node validation
+        #[cfg(feature = "schc-compressor")]
+        let network_spec_for_validation = network_spec.clone();
         let network = InMemoryNetwork::initialize(
             network_spec,
             network_events,
@@ -176,6 +179,65 @@ impl QuicSimulation {
                 *network.schc_enabled_nodes.write() = Some(nodes);
             } else {
                 println!("* Enabled nodes: all routers");
+            }
+        }
+
+        // Initialize SCHC compressor if enabled
+        #[cfg(feature = "schc-compressor")]
+        if quic_options.schc_compress {
+            use in_memory_network::schc_compressor::SchcCompressor;
+            use std::collections::HashSet;
+
+            let rules_path = quic_options.schc_rules.as_ref()
+                .context("--schc-rules required when --schc-compress is enabled")?;
+            let field_context_path = quic_options.schc_field_context.as_ref()
+                .context("--schc-field-context required when --schc-compress is enabled")?;
+
+            println!("--- SCHC Compressor ---");
+            println!("* Rules: {}", rules_path.display());
+            println!("* Field context: {}", field_context_path.display());
+            println!("* Debug mode: {}", quic_options.schc_debug);
+
+            let compressor = Arc::new(SchcCompressor::from_files(
+                rules_path.to_str().unwrap(),
+                field_context_path.to_str().unwrap(),
+                quic_options.schc_debug,
+            )?);
+
+            // Set the compressor on the network
+            *network.schc_compressor.write() = Some(compressor);
+
+            // Configure compression nodes if specified
+            if let Some(ref node_ids) = quic_options.schc_compress_nodes {
+                // Validate nodes exist
+                let available_node_ids: Vec<&str> = network_spec_for_validation.nodes.iter()
+                    .map(|n| n.id.as_str())
+                    .collect();
+                
+                let mut invalid_nodes = Vec::new();
+                for node_id in node_ids {
+                    if !available_node_ids.contains(&node_id.as_str()) {
+                        invalid_nodes.push(node_id.as_str());
+                    }
+                }
+                
+                if !invalid_nodes.is_empty() {
+                    bail!(
+                        "Invalid SCHC compress node(s) specified: [{}]\n\
+                         Available nodes in the network graph: [{}]",
+                        invalid_nodes.join(", "),
+                        available_node_ids.join(", ")
+                    );
+                }
+                
+                println!("* Compression nodes: {}", node_ids.join(", "));
+                let nodes: HashSet<Arc<str>> = node_ids
+                    .iter()
+                    .map(|s| Arc::<str>::from(s.as_str()))
+                    .collect();
+                *network.schc_compress_nodes.write() = Some(nodes);
+            } else {
+                println!("* WARNING: No --schc-compress-nodes specified, compression disabled");
             }
         }
 

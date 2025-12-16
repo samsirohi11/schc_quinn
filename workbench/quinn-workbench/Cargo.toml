@@ -13,6 +13,9 @@ rt-custom = ["in-memory-network/rt-custom"]
 # SCHC observer mode for compression analysis
 schc-observer = ["in-memory-network/schc-observer"]
 
+# SCHC compressor mode for actual packet compression/decompression
+schc-compressor = ["in-memory-network/schc-compressor"]
+
 [dependencies]
 anyhow.workspace = true
 async-lock.workspace = true

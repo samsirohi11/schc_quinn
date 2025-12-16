@@ -9,7 +9,10 @@ This project combines two components:
 1. **SCHC Compressor** (`schc/`) - A streaming, rule-based header compression engine supporting IPv4/IPv6/UDP/QUIC (github: [SCHC](https://github.com/samsirohi11/schc_r_c))
 2. **Quic Workbench** (`workbench/`) - An in-memory QUIC network simulator with time warping for deep-space RTT scenarios (github: [Quic Workbench](https://github.com/deepspaceip/dipt-quic-workbench))
 
-The integration enables **observer mode** compression analysis: measuring potential SCHC compression gains on QUIC traffic without modifying the actual packets (since decompression isn't yet implemented).
+The integration provides two modes:
+
+- **Observer Mode**: Read-only compression analysis - measures potential SCHC savings without modifying packets
+- **Compressor Mode**: Actual packet compression/decompression at designated SCHC-enabled nodes
 
 ---
 
@@ -173,7 +176,7 @@ git submodule update --init --recursive
 cd workbench
 cargo build --release --features schc-observer
 
-# Run Earth-Moon simulation with SCHC compression analysis
+# Run Earth-Moon simulation with SCHC compression analysis (observer mode)
 cargo run --release --features schc-observer --bin quinn-workbench -- quic \
   --network-graph test-data/earth-moon/networkgraph-1orbiter-1moonasset.json \
   --network-events test-data/earth-moon/events.json \
@@ -181,9 +184,21 @@ cargo run --release --features schc-observer --bin quinn-workbench -- quic \
   --server-ip-address 192.168.41.2 \
   --requests 3 \
   --schc-observer \
-  --schc-rules ../schc/quic_test.json \
+  --schc-rules ../schc/quic_rules.json \
   --schc-field-context ../schc/field-context.json \
   --schc-nodes MoonOrbiter1
+
+# Run with SCHC compressor mode (actual compression/decompression)
+cargo run --release --features schc-compressor --bin quinn-workbench -- quic \
+  --network-graph test-data/earth-moon/networkgraph-schc-2nodes.json \
+  --network-events test-data/earth-moon/events.json \
+  --client-ip-address 192.168.40.1 \
+  --server-ip-address 192.168.41.2 \
+  --requests 3 \
+  --schc-compress \
+  --schc-rules ../schc/quic_rules.json \
+  --schc-field-context ../schc/field-context.json \
+  --schc-compress-nodes SchcNode1,SchcNode2
 
 # Enable verbose debug output to see rule matching
 cargo run --release --features schc-observer --bin quinn-workbench -- quic \
@@ -225,28 +240,55 @@ schc_quinn/
 
 ## SCHC CLI Options
 
+### Observer Mode (Analysis Only)
+
+| Option                     | Description                                  |
+| -------------------------- | -------------------------------------------- |
+| `--schc-observer`          | Enable SCHC compression analysis (read-only) |
+| `--schc-nodes NODE1,NODE2` | Limit observation to specific router nodes   |
+
+### Compressor Mode (Actual Compression)
+
+| Option                              | Description                                        |
+| ----------------------------------- | -------------------------------------------------- |
+| `--schc-compress`                   | Enable actual packet compression/decompression     |
+| `--schc-compress-nodes NODE1,NODE2` | Nodes where compression/decompression is performed |
+
+### Common Options
+
 | Option                      | Description                                        |
 | --------------------------- | -------------------------------------------------- |
-| `--schc-observer`           | Enable SCHC compression analysis                   |
 | `--schc-rules PATH`         | Path to SCHC rules JSON file                       |
 | `--schc-field-context PATH` | Path to field context JSON file                    |
-| `--schc-nodes NODE1,NODE2`  | Limit observation to specific router nodes         |
 | `--schc-debug`              | Show detailed rule matching and compression output |
 
 ## Example Output
 
+### Observer Mode
+
 ```
---- SCHC Observer ---
-* Rules: ../schc/rules/quic_test.json
-* Field context: ../schc/rules/field-context.json
-* Enabled nodes: MoonOrbiter1
-...
 --- SCHC Observer Statistics ---
-* Packets processed: 25
-* Packets matched: 25 (100.0%)
-* Total original header: 360 bits (45.0 bytes)
-* Total compressed header: 375 bits (46.9 bytes)
-* Compression savings: 0 bits (0.0%, ratio 0.96:1)
+* Packets processed: 48
+* Packets matched: 48 (100.0%)
+* Total original header: 11616 bits (1452.0 bytes)
+* Total compressed header: 3456 bits (432.0 bytes)
+* Compression savings: 8160 bits (70.2%, ratio 3.36:1)
+```
+
+### Compressor Mode
+
+```
+[SCHC Compress @ SchcNode1] [UP] Full packet header: 29 → 9 bytes (saved 20 bytes)
+[SCHC Decompress @ SchcNode2] [UP] Full packet header: 9 → 29 bytes (restored 20 bytes)
+...
+--- SCHC Compressor Statistics ---
+* Packets compressed: 16
+* Packets decompressed: 16
+* Compression failures: 0
+* Decompression failures: 0
+* Total original header: 3712 bits (464.0 bytes)
+* Total compressed header: 1152 bits (144.0 bytes)
+* Compression savings: 2560 bits (69.0%, ratio 3.22:1)
 ```
 
 ## Architecture Reference
@@ -266,8 +308,8 @@ See: [**Quinn Workbench Architecture**](workbench/quinn_workbench_architecture.m
 - ✅ SCHC compressor with rule tree matching
 - ✅ QUIC header parsing (long/short headers)
 - ✅ Quinn workbench integration (observer mode)
-- 🔲 SCHC decompression
-- 🔲 Actual packet compression (transmit compressed data)
+- ✅ SCHC decompression
+- ✅ Actual packet compression at designated nodes
 - 🔲 Fragmentation/reassembly
 
 ## References

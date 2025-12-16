@@ -72,6 +72,14 @@ pub async fn run_and_report_stats(quic_options: &QuicOpt) -> anyhow::Result<()> 
         }
     }
 
+    // Report SCHC compressor statistics if enabled
+    #[cfg(feature = "schc-compressor")]
+    if quic_options.schc_compress {
+        if let Some(ref compressor) = *network.schc_compressor.read() {
+            compressor.stats().report();
+        }
+    }
+
     if result.is_err() {
         eprintln!("Error...");
     }

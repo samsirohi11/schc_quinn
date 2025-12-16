@@ -1,0 +1,248 @@
+{
+  "type": "NetworkGraph",
+  "nodes": [
+    {
+      "id": "Earth1",
+      "type": "host",
+      "bufferSizeBytes": 1000000000,
+      "interfaces": [
+        {
+          "addresses": [
+            {
+              "address": "192.168.40.1/24"
+            }
+          ],
+          "routes": [
+            {
+              "destination": "192.168.41.0/24",
+              "next": "192.168.40.2",
+              "cost": 100
+            },
+            {
+              "destination": "192.168.44.0/24",
+              "next": "192.168.40.2",
+              "cost": 100
+            },
+            {
+              "destination": "192.168.45.0/24",
+              "next": "192.168.40.2",
+              "cost": 100
+            }
+          ]
+        }
+      ],
+      "quic": {
+        "initial_rtt_ms": 7920000,
+        "maximum_idle_timeout_ms": 7920000,
+        "packet_threshold": 4294967295,
+        "mtu_discovery": false,
+        "maximize_send_and_receive_windows": true,
+        "max_ack_delay_ms": 23760000,
+        "ack_eliciting_threshold": 10,
+        "congestion_controller": "no_cc"
+      }
+    },
+    {
+      "id": "SchcNode1",
+      "type": "router",
+      "bufferSizeBytes": 1000000000,
+      "interfaces": [
+        {
+          "addresses": [
+            {
+              "address": "192.168.40.2/24"
+            }
+          ],
+          "routes": []
+        },
+        {
+          "addresses": [
+            {
+              "address": "192.168.44.1/24"
+            }
+          ],
+          "routes": [
+            {
+              "destination": "192.168.41.0/24",
+              "next": "192.168.44.2",
+              "cost": 100
+            },
+            {
+              "destination": "192.168.45.0/24",
+              "next": "192.168.44.2",
+              "cost": 100
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "MoonOrbiter1",
+      "type": "router",
+      "bufferSizeBytes": 1000000000,
+      "interfaces": [
+        {
+          "addresses": [
+            {
+              "address": "192.168.44.2/24"
+            }
+          ],
+          "routes": [
+            {
+              "destination": "192.168.40.0/24",
+              "next": "192.168.44.1",
+              "cost": 100
+            }
+          ]
+        },
+        {
+          "addresses": [
+            {
+              "address": "192.168.45.1/24"
+            }
+          ],
+          "routes": [
+            {
+              "destination": "192.168.41.0/24",
+              "next": "192.168.45.2",
+              "cost": 100
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "SchcNode2",
+      "type": "router",
+      "bufferSizeBytes": 1000000000,
+      "interfaces": [
+        {
+          "addresses": [
+            {
+              "address": "192.168.45.2/24"
+            }
+          ],
+          "routes": [
+            {
+              "destination": "192.168.40.0/24",
+              "next": "192.168.45.1",
+              "cost": 100
+            },
+            {
+              "destination": "192.168.44.0/24",
+              "next": "192.168.45.1",
+              "cost": 100
+            }
+          ]
+        },
+        {
+          "addresses": [
+            {
+              "address": "192.168.41.1/24"
+            }
+          ],
+          "routes": []
+        }
+      ]
+    },
+    {
+      "id": "MoonAsset1",
+      "type": "host",
+      "bufferSizeBytes": 1000000000,
+      "interfaces": [
+        {
+          "addresses": [
+            {
+              "address": "192.168.41.2/24"
+            }
+          ],
+          "routes": [
+            {
+              "destination": "192.168.40.0/24",
+              "next": "192.168.41.1",
+              "cost": 100
+            },
+            {
+              "destination": "192.168.44.0/24",
+              "next": "192.168.41.1",
+              "cost": 100
+            },
+            {
+              "destination": "192.168.45.0/24",
+              "next": "192.168.41.1",
+              "cost": 100
+            }
+          ]
+        }
+      ],
+      "quic": {
+        "initial_rtt_ms": 7920000,
+        "maximum_idle_timeout_ms": 7920000,
+        "packet_threshold": 4294967295,
+        "mtu_discovery": false,
+        "maximize_send_and_receive_windows": true,
+        "max_ack_delay_ms": 23760000,
+        "ack_eliciting_threshold": 10,
+        "congestion_controller": "no_cc"
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": "Earth1-SchcNode1",
+      "source": "192.168.40.1",
+      "target": "192.168.40.2",
+      "delay_ms": 100,
+      "bandwidth_bps": 10000000
+    },
+    {
+      "id": "SchcNode1-Earth1",
+      "source": "192.168.40.2",
+      "target": "192.168.40.1",
+      "delay_ms": 100,
+      "bandwidth_bps": 10000000
+    },
+    {
+      "id": "SchcNode1-MoonOrbiter1",
+      "source": "192.168.44.1",
+      "target": "192.168.44.2",
+      "delay_ms": 1400,
+      "bandwidth_bps": 10000000
+    },
+    {
+      "id": "MoonOrbiter1-SchcNode1",
+      "source": "192.168.44.2",
+      "target": "192.168.44.1",
+      "delay_ms": 1400,
+      "bandwidth_bps": 10000000
+    },
+    {
+      "id": "MoonOrbiter1-SchcNode2",
+      "source": "192.168.45.1",
+      "target": "192.168.45.2",
+      "delay_ms": 100,
+      "bandwidth_bps": 10000000
+    },
+    {
+      "id": "SchcNode2-MoonOrbiter1",
+      "source": "192.168.45.2",
+      "target": "192.168.45.1",
+      "delay_ms": 100,
+      "bandwidth_bps": 10000000
+    },
+    {
+      "id": "SchcNode2-MoonAsset1",
+      "source": "192.168.41.1",
+      "target": "192.168.41.2",
+      "delay_ms": 100,
+      "bandwidth_bps": 10000000
+    },
+    {
+      "id": "MoonAsset1-SchcNode2",
+      "source": "192.168.41.2",
+      "target": "192.168.41.1",
+      "delay_ms": 100,
+      "bandwidth_bps": 10000000
+    }
+  ]
+}

@@ -12,6 +12,9 @@ rt-custom = ["dep:sittard"]
 # SCHC observer mode for compression analysis
 schc-observer = ["dep:schc_r_c"]
 
+# SCHC compressor mode for actual packet compression/decompression
+schc-compressor = ["dep:schc_r_c"]
+
 [dependencies]
 anyhow.workspace = true
 async-lock.workspace = true

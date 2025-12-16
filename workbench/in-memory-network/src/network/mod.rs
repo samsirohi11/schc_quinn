@@ -63,6 +63,12 @@ pub struct InMemoryNetwork {
     /// Node IDs where SCHC observer is active (None = all routers)
     #[cfg(feature = "schc-observer")]
     pub schc_enabled_nodes: parking_lot::RwLock<Option<std::collections::HashSet<Arc<str>>>>,
+    /// SCHC compressor for actual packet compression (optional)
+    #[cfg(feature = "schc-compressor")]
+    pub schc_compressor: parking_lot::RwLock<Option<crate::schc_compressor::SharedSchcCompressor>>,
+    /// Node IDs where SCHC compression is active
+    #[cfg(feature = "schc-compressor")]
+    pub schc_compress_nodes: parking_lot::RwLock<Option<std::collections::HashSet<Arc<str>>>>,
 }
 
 impl InMemoryNetwork {
@@ -186,6 +192,10 @@ impl InMemoryNetwork {
             schc_observer: parking_lot::RwLock::new(None),
             #[cfg(feature = "schc-observer")]
             schc_enabled_nodes: parking_lot::RwLock::new(None),
+            #[cfg(feature = "schc-compressor")]
+            schc_compressor: parking_lot::RwLock::new(None),
+            #[cfg(feature = "schc-compressor")]
+            schc_compress_nodes: parking_lot::RwLock::new(None),
         });
 
         // Process node buffers in the background
@@ -475,6 +485,83 @@ impl InMemoryNetwork {
                     data.transmit.destination,
                     is_outgoing,
                 );
+            }
+        }
+
+        // SCHC Compressor: actually compress/decompress packets at designated nodes
+        #[cfg(feature = "schc-compressor")]
+        let mut data = data; // Make data mutable for compression
+        #[cfg(feature = "schc-compressor")]
+        if let Some(ref compressor) = *self.schc_compressor.read() {
+            let should_compress = match &*self.schc_compress_nodes.read() {
+                Some(nodes) => nodes.contains(&current_node.id),
+                None => false, // Compression must be explicitly enabled per-node
+            };
+            if should_compress {
+                // Determine direction based on IP addresses
+                let src_ip = data.source_endpoint.addr.ip();
+                let dst_ip = data.transmit.destination.ip();
+                let is_outgoing = match (src_ip, dst_ip) {
+                    (std::net::IpAddr::V4(src), std::net::IpAddr::V4(dst)) => {
+                        src.octets()[2] < dst.octets()[2]
+                    }
+                    _ => true,
+                };
+
+                // Determine if this node is "near source" or "near destination"
+                // by checking if any of the node's interfaces are on the source subnet
+                let src_subnet = match src_ip {
+                    std::net::IpAddr::V4(ip) => ip.octets()[2],
+                    _ => 0,
+                };
+                let dst_subnet = match dst_ip {
+                    std::net::IpAddr::V4(ip) => ip.octets()[2],
+                    _ => 0,
+                };
+                
+                // Check if this node has an interface on source subnet (near source)
+                let is_near_source = current_node.addresses.iter().any(|addr| {
+                    if let std::net::IpAddr::V4(ip) = addr {
+                        ip.octets()[2] == src_subnet
+                    } else {
+                        false
+                    }
+                });
+                
+                // Check if this node has an interface on destination subnet (near destination)
+                let is_near_dest = current_node.addresses.iter().any(|addr| {
+                    if let std::net::IpAddr::V4(ip) = addr {
+                        ip.octets()[2] == dst_subnet
+                    } else {
+                        false
+                    }
+                });
+
+                // Compression/decompression logic based on node position:
+                // - Near packet SOURCE → COMPRESS (before constrained link)
+                // - Near packet DEST → DECOMPRESS (after constrained link)
+                // This works for both UP (Earth→Moon) and DOWN (Moon→Earth) directions
+                let should_do_compression = is_near_source && !is_near_dest;
+                let should_do_decompression = is_near_dest && !is_near_source;
+
+                if should_do_compression {
+                    // Compress packet for transmission
+                    let result = compressor.compress(
+                        &data.transmit.contents,
+                        data.source_endpoint.addr,
+                        data.transmit.destination,
+                        is_outgoing,
+                        current_node.id.as_ref(),
+                    );
+                    if result.success {
+                        data.transmit.contents = result.compressed_packet;
+                    }
+                } else if should_do_decompression {
+                    // Decompress received packet
+                    if let Ok(result) = compressor.decompress(&data.transmit.contents, is_outgoing, current_node.id.as_ref()) {
+                        data.transmit.contents = result.decompressed_packet;
+                    }
+                }
             }
         }
 
