@@ -103,46 +103,7 @@ This allows rules to use directional field identifiers like `UDP.DEV_PORT` and `
 
 ### Key Implementation Details
 
-#### 1. Location in Code
-
-Both observer and compressor are invoked in [`in-memory-network/src/network/mod.rs`](workbench/in-memory-network/src/network/mod.rs) within the `forward()` method:
-
-```rust
-pub(crate) fn forward(
-    self: &Arc<InMemoryNetwork>,
-    current_node: Arc<Node>,
-    data: InTransitData,
-) {
-    self.tracer.track_packet_in_node(&current_node, &data);
-
-    // SCHC Observer: analyze compression potential at router nodes
-    #[cfg(feature = "schc-observer")]
-    if let Some(ref observer) = *self.schc_observer.read() {
-        // ... observation logic
-    }
-
-    // SCHC Compressor: actually compress/decompress packets
-    #[cfg(feature = "schc-compressor")]
-    if let Some(ref compressor) = *self.schc_compressor.read() {
-        // Determine node position relative to source/destination
-        let is_near_source = /* check subnet match with source */;
-        let is_near_dest = /* check subnet match with destination */;
-
-        if is_near_source && !is_near_dest {
-            // COMPRESS: Node is near source, before constrained link
-            let result = compressor.compress(&data.transmit.contents, ...);
-            data.transmit.contents = result.compressed_packet;
-        } else if is_near_dest && !is_near_source {
-            // DECOMPRESS: Node is near destination, after constrained link
-            let result = compressor.decompress(&data.transmit.contents, ...);
-            data.transmit.contents = result.decompressed_packet;
-        }
-    }
-    // ... continue forwarding
-}
-```
-
-#### 2. Observer Mode Behavior
+#### Observer Mode Behavior
 
 The SCHC observer operates in **read-only mode**:
 
@@ -150,7 +111,7 @@ The SCHC observer operates in **read-only mode**:
 - **Measures compression potential**: Calculates what compression would achieve if applied
 - **Tracks statistics**: Aggregates packet counts, original/compressed sizes, and savings
 
-#### 3. Compressor Mode Behavior
+#### Compressor Mode Behavior
 
 The SCHC compressor **modifies packets in-flight**:
 
@@ -159,7 +120,7 @@ The SCHC compressor **modifies packets in-flight**:
 - **Decompresses at destination-side node**: Reconstructs original headers from SCHC data using shared rule context
 - **Preserves application payload**: Only headers are compressed; payload passes through unchanged
 
-#### 4. Node Selection
+#### Node Selection
 
 SCHC can be limited to specific nodes:
 
