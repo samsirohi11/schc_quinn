@@ -150,17 +150,14 @@ impl QuicSimulation {
 
             let rules_path = quic_options.schc_rules.as_ref()
                 .context("--schc-rules required when --schc-observer is enabled")?;
-            let field_context_path = quic_options.schc_field_context.as_ref()
-                .context("--schc-field-context required when --schc-observer is enabled")?;
 
             println!("--- SCHC Observer ---");
             println!("* Rules: {}", rules_path.display());
-            println!("* Field context: {}", field_context_path.display());
             println!("* Debug mode: {}", quic_options.schc_debug);
 
             let observer = Arc::new(SchcObserver::from_files(
                 rules_path.to_str().unwrap(),
-                field_context_path.to_str().unwrap(),
+                "", // Field context no longer needed
                 quic_options.schc_debug,
             )?);
 
@@ -190,17 +187,14 @@ impl QuicSimulation {
 
             let rules_path = quic_options.schc_rules.as_ref()
                 .context("--schc-rules required when --schc-compress is enabled")?;
-            let field_context_path = quic_options.schc_field_context.as_ref()
-                .context("--schc-field-context required when --schc-compress is enabled")?;
 
             println!("--- SCHC Compressor ---");
             println!("* Rules: {}", rules_path.display());
-            println!("* Field context: {}", field_context_path.display());
             println!("* Debug mode: {}", quic_options.schc_debug);
 
             let compressor = Arc::new(SchcCompressor::from_files(
                 rules_path.to_str().unwrap(),
-                field_context_path.to_str().unwrap(),
+                "", // Field context no longer needed
                 quic_options.schc_debug,
             )?);
 

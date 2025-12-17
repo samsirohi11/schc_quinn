@@ -7,7 +7,7 @@ use pnet_packet::ip::IpNextHeaderProtocol;
 use pnet_packet::ipv4::MutableIpv4Packet;
 use pnet_packet::udp::MutableUdpPacket;
 use pnet_packet::{ipv4, udp};
-use schc::{build_tree, compress_packet, Direction, FieldContext, Rule, RuleSet, TreeNode};
+use schc::{build_tree, compress_packet, Direction, Rule, RuleSet, TreeNode};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -48,7 +48,6 @@ impl SchcStats {
 pub struct SchcObserver {
     tree: TreeNode,
     rules: Vec<Rule>,
-    field_context: FieldContext,
     stats: SchcStats,
     debug: bool,
 }
@@ -57,12 +56,11 @@ impl SchcObserver {
     /// Create a new SCHC observer from rules and field context files
     pub fn from_files(
         rules_path: &str,
-        field_context_path: &str,
+        _field_context_path: &str,
         debug: bool,
     ) -> anyhow::Result<Self> {
         let ruleset = RuleSet::from_file(rules_path)?;
-        let field_context = FieldContext::from_file(field_context_path)?;
-        let tree = build_tree(&ruleset.rules, &field_context);
+        let tree = build_tree(&ruleset.rules);
         
         if debug {
             println!("\n--- SCHC Rule Tree ---");
@@ -72,7 +70,6 @@ impl SchcObserver {
         Ok(Self {
             tree,
             rules: ruleset.rules,
-            field_context,
             stats: SchcStats::default(),
             debug,
         })
@@ -143,7 +140,6 @@ impl SchcObserver {
             &synthetic_packet,
             direction,
             &self.rules,
-            &self.field_context,
             self.debug, // Pass debug flag to see tree traversal output
         ) {
             Ok(result) => {

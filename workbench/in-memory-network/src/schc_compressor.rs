@@ -8,7 +8,7 @@ use pnet_packet::ipv4::MutableIpv4Packet;
 use pnet_packet::udp::MutableUdpPacket;
 use pnet_packet::{ipv4, udp};
 use schc::{
-    build_tree, compress_packet, decompress_packet, Direction, FieldContext, Rule, RuleSet,
+    build_tree, compress_packet, decompress_packet, Direction, Rule, RuleSet,
     TreeNode,
 };
 use std::net::{IpAddr, SocketAddr};
@@ -92,7 +92,6 @@ pub struct DecompressResult {
 pub struct SchcCompressor {
     tree: TreeNode,
     rules: Vec<Rule>,
-    field_context: FieldContext,
     stats: SchcCompressorStats,
     debug: bool,
 }
@@ -101,12 +100,11 @@ impl SchcCompressor {
     /// Create a new SCHC compressor from rules and field context files
     pub fn from_files(
         rules_path: &str,
-        field_context_path: &str,
+        _field_context_path: &str,
         debug: bool,
     ) -> anyhow::Result<Self> {
         let ruleset = RuleSet::from_file(rules_path)?;
-        let field_context = FieldContext::from_file(field_context_path)?;
-        let tree = build_tree(&ruleset.rules, &field_context);
+        let tree = build_tree(&ruleset.rules);
 
         if debug {
             println!("\n--- SCHC Compressor Rule Tree ---");
@@ -116,7 +114,6 @@ impl SchcCompressor {
         Ok(Self {
             tree,
             rules: ruleset.rules,
-            field_context,
             stats: SchcCompressorStats::default(),
             debug,
         })
@@ -160,7 +157,6 @@ impl SchcCompressor {
             &synthetic_packet,
             direction,
             &self.rules,
-            &self.field_context,
             self.debug,
         ) {
             Ok(result) => {
@@ -259,7 +255,6 @@ impl SchcCompressor {
             compressed_data,
             &self.rules,
             direction,
-            &self.field_context,
             None, // Payload will be extracted from compressed_data
         ) {
             Ok(result) => {

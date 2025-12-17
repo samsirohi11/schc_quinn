@@ -80,10 +80,6 @@ pub struct QuicOpt {
     #[arg(long)]
     pub schc_rules: Option<PathBuf>,
 
-    /// Path to SCHC field context JSON file
-    #[arg(long)]
-    pub schc_field_context: Option<PathBuf>,
-
     /// Node IDs where SCHC observer should be active (comma-separated, e.g., "MoonOrbiter1")
     /// If not specified, SCHC is applied at all router nodes
     #[arg(long, value_delimiter = ',')]

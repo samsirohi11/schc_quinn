@@ -236,7 +236,6 @@ cargo run --release --features schc-observer --bin quinn-workbench -- quic \
   --requests 3 \
   --schc-observer \
   --schc-rules ../schc/quic_rules.json \
-  --schc-field-context ../schc/field-context.json \
   --schc-nodes MoonOrbiter1
 
 # Run with SCHC compressor mode
@@ -248,7 +247,6 @@ cargo run --release --features schc-compressor --bin quinn-workbench -- quic \
   --requests 3 \
   --schc-compress \
   --schc-rules ../schc/quic_rules.json \
-  --schc-field-context ../schc/field-context.json \
   --schc-compress-nodes SchcNode1,SchcNode2
 
 # Enable verbose debug output to see rule matching
@@ -275,7 +273,7 @@ schc_quinn/
 │   │   ├── tree.rs              # Rule tree building
 │   │   └── streaming_tree.rs    # Unified parse+match+compress
 │   ├── quic_rules.json          # QUIC compression rules (version field)
-│   └── field-context.json       # Field size definitions
+│   └── field-context.json       # Field definitions (used at compile time)
 │
 └── workbench/                   # Quinn QUIC simulator
     ├── Cargo.toml
@@ -307,11 +305,10 @@ schc_quinn/
 
 ### Common Options
 
-| Option                      | Description                                        |
-| --------------------------- | -------------------------------------------------- |
-| `--schc-rules PATH`         | Path to SCHC rules JSON file                       |
-| `--schc-field-context PATH` | Path to field context JSON file                    |
-| `--schc-debug`              | Show detailed rule matching and compression output |
+| Option              | Description                                        |
+| ------------------- | -------------------------------------------------- |
+| `--schc-rules PATH` | Path to SCHC rules JSON file                       |
+| `--schc-debug`      | Show detailed rule matching and compression output |
 
 ## Example Output
 
