@@ -9,16 +9,16 @@ This project combines two components:
 1. **SCHC Compressor** (`schc/`) - A streaming, rule-based header compression engine supporting IPv4/IPv6/UDP/QUIC (github: [SCHC](https://github.com/samsirohi11/schc_r_c))
 2. **Quic Workbench** (`workbench/`) - An in-memory QUIC network simulator with time warping for deep-space RTT scenarios (github: [Quic Workbench](https://github.com/deepspaceip/dipt-quic-workbench))
 
-The integration provides two modes:
-
-- **Observer Mode**: Read-only compression analysis - measures potential SCHC savings without modifying packets
-- **Compressor Mode**: Actual packet compression/decompression at designated SCHC-enabled nodes
-
 ---
 
 ## How SCHC Integrates with Quinn Workbench
 
-### Integration Point in the Pipeline
+The integration provides two distinct operational modes:
+
+1. **Observer Mode** (`--schc-observer`): Read-only analysis that measures compression potential without modifying packets
+2. **Compressor Mode** (`--schc-compress`): Actual packet compression and decompression at designated network nodes
+
+### Observer Mode: Integration Point
 
 The SCHC observer is integrated into the **packet forwarding layer** of the in-memory network simulation. For a detailed understanding of the workbench architecture, see [Quinn Workbench Architecture](workbench/quinn_workbench_architecture.md).
 
@@ -26,7 +26,7 @@ SCHC compression analysis occurs at a specific point in the packet flow:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        PACKET FLOW WITH SCHC OBSERVER                       │
+│                   PACKET FLOW WITH SCHC OBSERVER / COMPRESSOR               │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │   Quinn Endpoint                                                            │
@@ -38,21 +38,26 @@ SCHC compression analysis occurs at a specific point in the packet flow:
 │   InMemoryNetwork.forward(source_node, InTransitData)                       │
 │        │                                                                    │
 │        ├──────────────────────────────────────────────────────┐             │
-│        |                                                      │             │
+│        │                                                      │             │
 │   ┌─────────────────────────────────────────────────────┐     │             │
-│   │           SCHC OBSERVER INTERCEPT POINT             │◄────┘             │
+│   │      SCHC INTERCEPT POINT (in forward() method)     │◄────┘             │
 │   │                                                     │                   │
-│   │  if schc_observer enabled AND node in enabled_nodes │                   │
-│   │       │                                             │                   │
-│   │       ▼                                             │                   │
-│   │  observer.observe(quic_payload, direction)          │                   │
-│   │       │                                             │                   │
-│   │       ├─► Build synthetic Ethernet+IP+UDP frame     │                   │
-│   │       │   around QUIC payload                       │                   │
-│   │       │                                             │                   │
-│   │       ├─► Match against SCHC rule tree              │                   │
-│   │       │                                             │                   │
-│   │       └─► Accumulate compression statistics         │                   │
+│   │  ┌───────────────────────────────────────────────┐  │                   │
+│   │  │ OBSERVER MODE (--schc-observer)               │  │                   │
+│   │  │  • Builds synthetic Ethernet+IP+UDP frame     │  │                   │
+│   │  │  • Matches against SCHC rule tree             │  │                   │
+│   │  │  • Accumulates statistics (read-only)         │  │                   │
+│   │  │  • Does NOT modify packet                     │  │                   │
+│   │  └───────────────────────────────────────────────┘  │                   │
+│   │                      OR                             │                   │
+│   │  ┌───────────────────────────────────────────────┐  │                   │
+│   │  │ COMPRESSOR MODE (--schc-compress)             │  │                   │
+│   │  │  If near source:                              │  │                   │
+│   │  │    • COMPRESS: headers → rule ID + residue    │  │                   │
+│   │  │  If near destination:                         │  │                   │
+│   │  │    • DECOMPRESS: rule ID + residue → headers  │  │                   │
+│   │  │  • MODIFIES packet in-flight                  │  │                   │
+│   │  └───────────────────────────────────────────────┘  │                   │
 │   │                                                     │                   │
 │   └─────────────────────────────────────────────────────┘                   │
 │        │                                                                    │
@@ -63,7 +68,7 @@ SCHC compression analysis occurs at a specific point in the packet flow:
 │   NetworkLink.send() → Packet delivered after delay                         │
 │        │                                                                    │
 │        ▼                                                                    │
-│   Next node's forward() [SCHC observer may run again]                       │
+│   Next node's forward() [SCHC runs again at each enabled node]              │
 │        │                                                                    │
 │        ▼                                                                    │
 │   Destination host receives packet                                          │
@@ -71,11 +76,62 @@ SCHC compression analysis occurs at a specific point in the packet flow:
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+### Compressor Mode: Bidirectional Compression
+
+When compressor mode is enabled, SCHC performs **actual packet compression and decompression** at designated nodes. The system determines whether to compress or decompress based on the node's position relative to the packet's source and destination.
+
+#### Bidirectional Data Flow
+
+The same nodes handle both uplink (Earth→Moon) and downlink (Moon→Earth) traffic, switching roles based on packet direction:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                    COMPRESSOR MODE: BIDIRECTIONAL FLOW                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  UPLINK (Earth → Moon):                                                     │
+│ ┌──────────┐  ┌───────────┐   ┌─────────────┐  ┌───────────┐  ┌──────────┐  │
+│ │  Earth1  │─►│ SchcNode1 │══►│MoonOrbiter1 │─►│ SchcNode2 │─►│MoonAsset1│  │
+│ │          │  │ COMPRESS  │   │  (relay)    │  │DECOMPRESS │  │          │  │
+│ └──────────┘  └───────────┘   └─────────────┘  └───────────┘  └──────────┘  │
+│                 [29B→9B hdr]    1.4s delay     [9B→29B hdr]                 │
+│                                                                             │
+│  DOWNLINK (Moon → Earth):                                                   │
+│ ┌──────────┐  ┌───────────┐   ┌─────────────┐  ┌───────────┐  ┌──────────┐  │
+│ │MoonAsset1│─►│ SchcNode2 │══►│MoonOrbiter1 │─►│ SchcNode1 │─►│  Earth1  │  │
+│ │          │  │ COMPRESS  │   │  (relay)    │  │DECOMPRESS │  │          │  │
+│ └──────────┘  └───────────┘   └─────────────┘  └───────────┘  └──────────┘  │
+│                 [29B→9B hdr]    1.4s delay     [9B→29B hdr]                 │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Compression/Decompression Decision Logic
+
+The system determines whether to compress or decompress based on **node proximity**:
+
+| Node Position           | Action           | Reason                                        |
+| ----------------------- | ---------------- | --------------------------------------------- |
+| Near packet source      | **Compress**     | Reduce data before bandwidth-constrained link |
+| Near packet destination | **Decompress**   | Restore headers for endpoint processing       |
+| Both or neither         | **Pass-through** | Node not on constrained link boundary         |
+
+Proximity is determined by comparing the node's interface subnets with the packet's source/destination subnets.
+
+#### Direction-Aware Rule Matching
+
+The compressor uses **directional rules** to correctly match fields based on packet flow:
+
+- **UP direction**: Packets from lower subnet (Earth: `192.168.40.x`) to higher (Moon: `192.168.41.x`)
+- **DOWN direction**: Packets from higher subnet (Moon) to lower (Earth)
+
+This allows rules to use directional field identifiers like `UDP.DEV_PORT` and `UDP.APP_PORT` that resolve differently based on direction.
+
 ### Key Implementation Details
 
 #### 1. Location in Code
 
-The SCHC observer is invoked in [`in-memory-network/src/network/mod.rs`](workbench/in-memory-network/src/network/mod.rs) within the `forward()` method:
+Both observer and compressor are invoked in [`in-memory-network/src/network/mod.rs`](workbench/in-memory-network/src/network/mod.rs) within the `forward()` method:
 
 ```rust
 pub(crate) fn forward(
@@ -88,12 +144,24 @@ pub(crate) fn forward(
     // SCHC Observer: analyze compression potential at router nodes
     #[cfg(feature = "schc-observer")]
     if let Some(ref observer) = *self.schc_observer.read() {
-        let should_observe = match &*self.schc_enabled_nodes.read() {
-            Some(nodes) => nodes.contains(&current_node.id),
-            None => current_node.udp_endpoint.is_none(), // Default: all routers
-        };
-        if should_observe {
-            observer.observe(&data.transmit.contents, is_outgoing);
+        // ... observation logic
+    }
+
+    // SCHC Compressor: actually compress/decompress packets
+    #[cfg(feature = "schc-compressor")]
+    if let Some(ref compressor) = *self.schc_compressor.read() {
+        // Determine node position relative to source/destination
+        let is_near_source = /* check subnet match with source */;
+        let is_near_dest = /* check subnet match with destination */;
+
+        if is_near_source && !is_near_dest {
+            // COMPRESS: Node is near source, before constrained link
+            let result = compressor.compress(&data.transmit.contents, ...);
+            data.transmit.contents = result.compressed_packet;
+        } else if is_near_dest && !is_near_source {
+            // DECOMPRESS: Node is near destination, after constrained link
+            let result = compressor.decompress(&data.transmit.contents, ...);
+            data.transmit.contents = result.decompressed_packet;
         }
     }
     // ... continue forwarding
@@ -108,21 +176,39 @@ The SCHC observer operates in **read-only mode**:
 - **Measures compression potential**: Calculates what compression would achieve if applied
 - **Tracks statistics**: Aggregates packet counts, original/compressed sizes, and savings
 
-#### 3. Node Selection
+#### 3. Compressor Mode Behavior
 
-SCHC observation can be limited to specific nodes:
+The SCHC compressor **modifies packets in-flight**:
 
-| Configuration               | Behavior                        |
+- **Builds synthetic frames**: Wraps QUIC payload with synthetic Ethernet+IP+UDP headers for SCHC processing
+- **Compresses at source-side node**: Replaces IP+UDP+QUIC headers with compact SCHC format (rule ID + residues)
+- **Decompresses at destination-side node**: Reconstructs original headers from SCHC data using shared rule context
+- **Preserves application payload**: Only headers are compressed; payload passes through unchanged
+
+#### 4. Node Selection
+
+SCHC can be limited to specific nodes:
+
+**Observer Mode:**
+| Configuration | Behavior |
 | --------------------------- | ------------------------------- |
-| `--schc-nodes MoonOrbiter1` | Only observe at MoonOrbiter1    |
-| `--schc-nodes Node1,Node2`  | Observe at Node1 and Node2      |
-| _(no --schc-nodes)_         | Observe at **all router nodes** |
+| `--schc-nodes MoonOrbiter1` | Only observe at MoonOrbiter1 |
+| `--schc-nodes Node1,Node2` | Observe at Node1 and Node2 |
+| _(no --schc-nodes)_ | Observe at **all router nodes** |
 
-By default, only **router nodes** are observed (nodes without UDP endpoints).
+**Compressor Mode:**
+| Configuration | Behavior |
+| ------------------------------------ | ----------------------------------------------- |
+| `--schc-compress-nodes Node1,Node2` | Compress/decompress at Node1 and Node2 |
+| _(no --schc-compress-nodes)_ | **No compression** (must be explicitly enabled) |
 
-### Data Flow Diagram
+By default, observer runs on all routers, but compressor must be explicitly enabled per-node.
 
-For reference, here's how packets flow through the complete workbench (per the [architecture document](workbench/quinn_workbench_architecture.md)):
+### Data Flow Diagrams
+
+For reference, here's how packets flow through the complete workbench for each mode (per the [architecture document](workbench/quinn_workbench_architecture.md)):
+
+#### Observer Mode Flow
 
 ```mermaid
 sequenceDiagram
@@ -147,9 +233,28 @@ sequenceDiagram
     D->>Q: poll_recv returns packet
 ```
 
+#### Compressor Mode Flow (Earth → Moon)
+
+```mermaid
+sequenceDiagram
+    participant Earth1 as Earth1 Client
+    participant S1 as SchcNode1
+    participant Orbiter as MoonOrbiter1
+    participant S2 as SchcNode2
+    participant Moon as MoonAsset1 Server
+
+    Earth1->>S1: Original packet
+    Note over S1: SCHC COMPRESS<br/>IP+UDP+QUIC → RuleID+Residue
+    S1->>Orbiter: Compressed packet
+    Note over S1,Orbiter: 1.4s delay (deep space link)
+    Orbiter->>S2: Compressed packet
+    Note over S2: SCHC DECOMPRESS<br/>RuleID+Residue → IP+UDP+QUIC
+    S2->>Moon: Original packet
+```
+
 ### Statistics Collected
 
-The `SchcObserver` tracks:
+**Observer Mode** (`SchcObserver`):
 
 | Statistic               | Description                                        |
 | ----------------------- | -------------------------------------------------- |
@@ -157,6 +262,17 @@ The `SchcObserver` tracks:
 | `packets_matched`       | Packets that matched at least one SCHC rule        |
 | `total_original_bits`   | Sum of original header sizes (IP+UDP+QUIC)         |
 | `total_compressed_bits` | Sum of compressed header sizes (rule ID + residue) |
+
+**Compressor Mode** (`SchcCompressor`):
+
+| Statistic                      | Description                                     |
+| ------------------------------ | ----------------------------------------------- |
+| `packets_compressed`           | Total packets compressed at source nodes        |
+| `packets_decompressed`         | Total packets decompressed at dest nodes        |
+| `compression_failures`         | Packets that failed to compress                 |
+| `decompression_failures`       | Packets that failed to decompress               |
+| `total_original_header_bits`   | Sum of original header sizes before compression |
+| `total_compressed_header_bits` | Sum of compressed header sizes                  |
 
 ---
 
@@ -172,9 +288,9 @@ git submodule update --init --recursive
 ```
 
 ```bash
-# Build with SCHC observer support
+# Build with SCHC observer, compressor support
 cd workbench
-cargo build --release --features schc-observer
+cargo build --release --features schc-observer,schc-compressor
 
 # Run Earth-Moon simulation with SCHC compression analysis (observer mode)
 cargo run --release --features schc-observer --bin quinn-workbench -- quic \
@@ -188,7 +304,7 @@ cargo run --release --features schc-observer --bin quinn-workbench -- quic \
   --schc-field-context ../schc/field-context.json \
   --schc-nodes MoonOrbiter1
 
-# Run with SCHC compressor mode (actual compression/decompression)
+# Run with SCHC compressor mode
 cargo run --release --features schc-compressor --bin quinn-workbench -- quic \
   --network-graph test-data/earth-moon/networkgraph-schc-2nodes.json \
   --network-events test-data/earth-moon/events.json \
@@ -240,14 +356,14 @@ schc_quinn/
 
 ## SCHC CLI Options
 
-### Observer Mode (Analysis Only)
+### Observer Mode
 
 | Option                     | Description                                  |
 | -------------------------- | -------------------------------------------- |
 | `--schc-observer`          | Enable SCHC compression analysis (read-only) |
 | `--schc-nodes NODE1,NODE2` | Limit observation to specific router nodes   |
 
-### Compressor Mode (Actual Compression)
+### Compressor Mode
 
 | Option                              | Description                                        |
 | ----------------------------------- | -------------------------------------------------- |
@@ -290,27 +406,6 @@ schc_quinn/
 * Total compressed header: 1152 bits (144.0 bytes)
 * Compression savings: 2560 bits (69.0%, ratio 3.22:1)
 ```
-
-## Architecture Reference
-
-For complete details on the Quinn Workbench simulation engine, including:
-
-- **InMemoryNetwork** structure and initialization
-- **Node** types (hosts vs routers)
-- **NetworkLink** parameters (delay, bandwidth, failure injection)
-- **Time warping** for deep-space RTT simulation
-- **Packet flow** through the simulated network
-
-See: [**Quinn Workbench Architecture**](workbench/quinn_workbench_architecture.md)
-
-## Status
-
-- ✅ SCHC compressor with rule tree matching
-- ✅ QUIC header parsing (long/short headers)
-- ✅ Quinn workbench integration (observer mode)
-- ✅ SCHC decompression
-- ✅ Actual packet compression at designated nodes
-- 🔲 Fragmentation/reassembly
 
 ## References
 

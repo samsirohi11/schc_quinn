@@ -199,12 +199,12 @@ impl SchcCompressor {
                     .total_compressed_header_bits
                     .fetch_add(result.compressed_header_bits, Ordering::Relaxed);
 
-                if self.debug {
-                    let dir_str = if is_outgoing { "UP" } else { "DOWN" };
-                    let original_bytes = (result.original_header_bits + 7) / 8;
-                    let compressed_bytes = (result.compressed_header_bits + 7) / 8;
-                    let saved_bytes = original_bytes.saturating_sub(compressed_bytes);
-                    println!(
+                // Show header compression (compression)
+                let dir_str = if is_outgoing { "UP" } else { "DOWN" };
+                let original_bytes = (result.original_header_bits + 7) / 8;
+                let compressed_bytes = (result.compressed_header_bits + 7) / 8;
+                let saved_bytes = original_bytes.saturating_sub(compressed_bytes);
+                println!(
                         "[SCHC Compress @ {}] [{}] Full packet header: {} → {} bytes (saved {} bytes)",
                         node_id,
                         dir_str,
@@ -212,7 +212,7 @@ impl SchcCompressor {
                         compressed_bytes,
                         saved_bytes
                     );
-                }
+                
 
                 CompressResult {
                     compressed_packet,
@@ -238,7 +238,7 @@ impl SchcCompressor {
         }
     }
 
-    /// Decompress a SCHC packet back to QUIC payload.
+    /// Decompress a SCHC packet back to QUIC.
     ///
     /// Takes compressed SCHC data + payload, reconstructs the original QUIC packet.
     pub fn decompress(
@@ -287,21 +287,21 @@ impl SchcCompressor {
 
                 self.stats.packets_decompressed.fetch_add(1, Ordering::Relaxed);
 
-                if self.debug {
-                    // Show header restoration (reverse of compression)
-                    let dir_str = if is_outgoing { "UP" } else { "DOWN" };
-                    let compressed_bytes = (result.bits_consumed + 7) / 8;
-                    let restored_bytes = result.header_data.len();
-                    let restored_saved = restored_bytes.saturating_sub(compressed_bytes);
-                    println!(
-                        "[SCHC Decompress @ {}] [{}] Full packet header: {} → {} bytes (restored {} bytes)",
-                        node_id,
-                        dir_str,
-                        compressed_bytes,
-                        restored_bytes,
-                        restored_saved
-                    );
-                }
+                
+                // Show header restoration (decompression)
+                let dir_str = if is_outgoing { "UP" } else { "DOWN" };
+                let compressed_bytes = (result.bits_consumed + 7) / 8;
+                let restored_bytes = result.header_data.len();
+                let restored_saved = restored_bytes.saturating_sub(compressed_bytes);
+                println!(
+                    "[SCHC Decompress @ {}] [{}] Full packet header: {} → {} bytes (restored {} bytes)",
+                    node_id,
+                    dir_str,
+                    compressed_bytes,
+                    restored_bytes,
+                    restored_saved
+                );
+                
 
                 Ok(DecompressResult {
                     decompressed_packet,
