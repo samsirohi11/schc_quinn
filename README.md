@@ -80,32 +80,6 @@ SCHC compression analysis occurs at a specific point in the packet flow:
 
 When compressor mode is enabled, SCHC performs **actual packet compression and decompression** at designated nodes. The system determines whether to compress or decompress based on the node's position relative to the packet's source and destination.
 
-#### Bidirectional Data Flow
-
-The same nodes handle both uplink (Earth→Moon) and downlink (Moon→Earth) traffic, switching roles based on packet direction:
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    COMPRESSOR MODE: BIDIRECTIONAL FLOW                      │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  UPLINK (Earth → Moon):                                                     │
-│ ┌──────────┐  ┌───────────┐   ┌─────────────┐  ┌───────────┐  ┌──────────┐  │
-│ │  Earth1  │─►│ SchcNode1 │══►│MoonOrbiter1 │─►│ SchcNode2 │─►│MoonAsset1│  │
-│ │          │  │ COMPRESS  │   │  (relay)    │  │DECOMPRESS │  │          │  │
-│ └──────────┘  └───────────┘   └─────────────┘  └───────────┘  └──────────┘  │
-│                 [29B→9B hdr]    1.4s delay     [9B→29B hdr]                 │
-│                                                                             │
-│  DOWNLINK (Moon → Earth):                                                   │
-│ ┌──────────┐  ┌───────────┐   ┌─────────────┐  ┌───────────┐  ┌──────────┐  │
-│ │MoonAsset1│─►│ SchcNode2 │══►│MoonOrbiter1 │─►│ SchcNode1 │─►│  Earth1  │  │
-│ │          │  │ COMPRESS  │   │  (relay)    │  │DECOMPRESS │  │          │  │
-│ └──────────┘  └───────────┘   └─────────────┘  └───────────┘  └──────────┘  │
-│                 [29B→9B hdr]    1.4s delay     [9B→29B hdr]                 │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
 #### Compression/Decompression Decision Logic
 
 The system determines whether to compress or decompress based on **node proximity**:
