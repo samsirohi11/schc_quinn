@@ -196,6 +196,7 @@ impl QuicSimulation {
                 rules_path.to_str().unwrap(),
                 "", // Field context no longer needed
                 quic_options.schc_debug,
+                quic_options.schc_dynamic_quic_rules,
             )?);
 
             // Set the compressor on the network

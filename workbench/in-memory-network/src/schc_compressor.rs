@@ -3,14 +3,16 @@
 //! Provides actual header compression and decompression for transmitted packets.
 //! Compresses IP/UDP/QUIC headers, keeping Ethernet frame for routing.
 
+use parking_lot::RwLock;
 use pnet_packet::ip::IpNextHeaderProtocol;
 use pnet_packet::ipv4::MutableIpv4Packet;
 use pnet_packet::udp::MutableUdpPacket;
 use pnet_packet::{ipv4, udp};
 use schc::{
-    build_tree, compress_packet, decompress_packet, Direction, Rule, RuleSet,
-    TreeNode,
+    build_tree, compress_packet, decompress_packet, Direction, FieldId, Rule, RuleSet,
+    TreeNode, QuicSession,
 };
+use schc::parser::StreamingParser;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -90,18 +92,29 @@ pub struct DecompressResult {
 
 /// SCHC Compressor for actual packet compression/decompression
 pub struct SchcCompressor {
-    tree: TreeNode,
-    rules: Vec<Rule>,
+    /// Rule tree (mutable for dynamic rule updates)
+    tree: RwLock<TreeNode>,
+    /// Rules (mutable for dynamic rule updates)
+    rules: RwLock<Vec<Rule>>,
+    /// QUIC session for dynamic rule generation (if enabled)
+    quic_session: Option<RwLock<QuicSession>>,
     stats: SchcCompressorStats,
     debug: bool,
 }
 
 impl SchcCompressor {
     /// Create a new SCHC compressor from rules and field context files
+    ///
+    /// # Arguments
+    /// * `rules_path` - Path to the SCHC rules JSON file
+    /// * `_field_context_path` - Unused (kept for API compatibility)
+    /// * `debug` - Enable debug output
+    /// * `dynamic_quic_rules` - Enable dynamic QUIC rule generation based on learned CIDs
     pub fn from_files(
         rules_path: &str,
         _field_context_path: &str,
         debug: bool,
+        dynamic_quic_rules: bool,
     ) -> anyhow::Result<Self> {
         let ruleset = RuleSet::from_file(rules_path)?;
         let tree = build_tree(&ruleset.rules);
@@ -111,9 +124,19 @@ impl SchcCompressor {
             schc::display_tree(&tree);
         }
 
+        // Initialize QUIC session for dynamic rule generation if enabled
+        // Use rule IDs 240-255 for dynamic rules (8-bit rule IDs)
+        let quic_session = if dynamic_quic_rules {
+            println!("* Dynamic QUIC rule generation: enabled");
+            Some(RwLock::new(QuicSession::new(240, 250, 8, debug)))
+        } else {
+            None
+        };
+
         Ok(Self {
-            tree,
-            rules: ruleset.rules,
+            tree: RwLock::new(tree),
+            rules: RwLock::new(ruleset.rules),
+            quic_session,
             stats: SchcCompressorStats::default(),
             debug,
         })
@@ -152,14 +175,21 @@ impl SchcCompressor {
             );
         }
 
+        // Acquire read locks for compression
+        let tree = self.tree.read();
+        let rules = self.rules.read();
+
         match compress_packet(
-            &self.tree,
+            &tree,
             &synthetic_packet,
             direction,
-            &self.rules,
+            &rules,
             self.debug,
         ) {
             Ok(result) => {
+                let rule_id = result.rule_id;
+                let rule_id_length = result.rule_id_length;
+
                 // The compressed result contains:
                 // - result.data: the SCHC compressed header (rule ID + residues)
                 // - We need to append the payload (data after the headers)
@@ -208,17 +238,27 @@ impl SchcCompressor {
                         compressed_bytes,
                         saved_bytes
                     );
-                
+
+                // Drop read locks before potentially acquiring write locks
+                drop(tree);
+                drop(rules);
+
+                // If dynamic QUIC rules are enabled, try to learn connection IDs
+                if let Some(ref session_lock) = self.quic_session {
+                    self.try_learn_quic_cids(&synthetic_packet, direction, rule_id, rule_id_length, session_lock);
+                }
 
                 CompressResult {
                     compressed_packet,
                     original_header_size: original_header_bytes,
                     compressed_header_size: compressed_header_bytes,
-                    rule_id: result.rule_id,
+                    rule_id,
                     success: true,
                 }
             }
             Err(e) => {
+                drop(tree);
+                drop(rules);
                 self.stats.compression_failures.fetch_add(1, Ordering::Relaxed);
                 if self.debug {
                     println!("[SCHC Compress] Failed: {:?}", e);
@@ -231,6 +271,71 @@ impl SchcCompressor {
                     success: false,
                 }
             }
+        }
+    }
+
+    /// Try to learn QUIC connection IDs from a packet for dynamic rule generation
+    fn try_learn_quic_cids(
+        &self,
+        synthetic_packet: &[u8],
+        direction: Direction,
+        rule_id: u32,
+        rule_id_length: u8,
+        session_lock: &RwLock<QuicSession>,
+    ) {
+        // Parse packet to extract QUIC fields
+        let Ok(mut parser) = StreamingParser::new(synthetic_packet, direction) else {
+            return;
+        };
+
+        // Parse QUIC CID fields (they get cached in the parser)
+        let _ = parser.parse_field(FieldId::QuicFirstByte);
+        let _ = parser.parse_field(FieldId::QuicVersion);
+        let _ = parser.parse_field(FieldId::QuicDcidLen);
+        let _ = parser.parse_field(FieldId::QuicDcid);
+        let _ = parser.parse_field(FieldId::QuicScidLen);
+        let _ = parser.parse_field(FieldId::QuicScid);
+
+        // Find the base rule that matched this packet
+        let rules = self.rules.read();
+        let base_rule = rules.iter()
+            .find(|r| r.rule_id == rule_id && r.rule_id_length == rule_id_length);
+
+        // Update session with learned CIDs
+        let mut session = session_lock.write();
+        if session.update_from_packet(&parser, base_rule) {
+            // New rules were generated! Add them and rebuild tree
+            let new_rules = session.take_generated_rules();
+            let unique_dcids = session.unique_dcid_count();
+            drop(session); // Release session lock before acquiring rules write lock
+            drop(rules);   // Release rules read lock
+
+            println!("\n[QUIC Dynamic] Generated/updated {} rules (total unique DCIDs: {})",
+                     new_rules.len(), unique_dcids);
+            for rule in &new_rules {
+                println!("  - Rule {}/{}: {}",
+                         rule.rule_id, rule.rule_id_length,
+                         rule.comment.as_deref().unwrap_or("QUIC specific rule"));
+            }
+
+            // Acquire write locks and update
+            let mut rules_write = self.rules.write();
+            // Remove any existing rules with same ID before adding new ones
+            for new_rule in &new_rules {
+                rules_write.retain(|r|
+                    !(r.rule_id == new_rule.rule_id && r.rule_id_length == new_rule.rule_id_length)
+                );
+            }
+            rules_write.extend(new_rules);
+
+            // Rebuild the tree
+            let new_tree = build_tree(&rules_write);
+            drop(rules_write);
+
+            let mut tree_write = self.tree.write();
+            *tree_write = new_tree;
+
+            println!("[QUIC Dynamic] Tree rebuilt with updated rules\n");
         }
     }
 
@@ -249,18 +354,21 @@ impl SchcCompressor {
             Direction::Down
         };
 
+        // Acquire read lock for rules
+        let rules = self.rules.read();
+
         // Try to decompress the SCHC packet
         // Note: We need to figure out where the payload starts (after SCHC residues)
         match decompress_packet(
             compressed_data,
-            &self.rules,
+            &rules,
             direction,
             None, // Payload will be extracted from compressed_data
         ) {
             Ok(result) => {
                 // The decompressed packet contains reconstructed IP+UDP+QUIC headers
                 // We need to extract just the QUIC portion for Quinn
-                
+
                 // bits_consumed tells us how many bits were the SCHC data (rule ID + residues)
                 let schc_bytes = (result.bits_consumed + 7) / 8;
                 let payload_start = schc_bytes.min(compressed_data.len());

@@ -98,6 +98,12 @@ pub struct QuicOpt {
     #[arg(long, value_delimiter = ',')]
     pub schc_compress_nodes: Option<Vec<String>>,
 
+    /// Enable dynamic QUIC rule generation based on learned connection IDs
+    /// When enabled, SCHC learns DCIDs/SCIDs from handshake packets and generates
+    /// more specific rules for better compression of subsequent packets
+    #[arg(long, default_value_t = false)]
+    pub schc_dynamic_quic_rules: bool,
+
     #[command(flatten)]
     pub network: NetworkOpt,
 }

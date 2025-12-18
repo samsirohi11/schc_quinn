@@ -255,6 +255,28 @@ cargo run --release --features schc-observer --bin quinn-workbench -- quic \
   --schc-debug
 ```
 
+### Dynamic QUIC Rules
+
+QUIC uses connection IDs (CIDs) that are established during the handshake. Static SCHC rules cannot
+know these CIDs in advance, so they must send them in full. Dynamic QUIC rules try to solve this by learning CIDs from the handshake and generating specific rules that can elide them entirely.
+
+To enable dynamic QUIC rule generation:
+
+```bash
+# Run with dynamic QUIC rules
+cargo run --release --features schc-observer --bin quinn-workbench -- quic \
+  ... \
+  --schc-dynamic-quic-rules
+```
+
+When enabled, the compressor will:
+
+1. Learn connection IDs from QUIC long header packets (handshake)
+2. Generate specific short header rules for each learned DCID (completely elides the CID)
+3. Generate a long header rule with match-mapping for all observed CIDs
+4. Rebuild the rule tree dynamically to use the new more specific rules
+5. Achieve better compression on subsequent packets
+
 ## Project Structure
 
 ```
