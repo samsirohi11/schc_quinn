@@ -66,17 +66,16 @@ impl QuicSimulation {
         #[cfg(feature = "schc-observer")]
         if quic_options.schc_observer {
             if let Some(ref node_ids) = quic_options.schc_nodes {
-                let available_node_ids: Vec<&str> = network_spec.nodes.iter()
-                    .map(|n| n.id.as_str())
-                    .collect();
-                
+                let available_node_ids: Vec<&str> =
+                    network_spec.nodes.iter().map(|n| n.id.as_str()).collect();
+
                 let mut invalid_nodes = Vec::new();
                 for node_id in node_ids {
                     if !available_node_ids.contains(&node_id.as_str()) {
                         invalid_nodes.push(node_id.as_str());
                     }
                 }
-                
+
                 if !invalid_nodes.is_empty() {
                     bail!(
                         "Invalid SCHC node(s) specified: [{}]\n\
@@ -148,7 +147,9 @@ impl QuicSimulation {
             use in_memory_network::schc_observer::SchcObserver;
             use std::collections::HashSet;
 
-            let rules_path = quic_options.schc_rules.as_ref()
+            let rules_path = quic_options
+                .schc_rules
+                .as_ref()
                 .context("--schc-rules required when --schc-observer is enabled")?;
 
             println!("--- SCHC Observer ---");
@@ -167,7 +168,7 @@ impl QuicSimulation {
             // Configure enabled nodes if specified
             if let Some(ref node_ids) = quic_options.schc_nodes {
                 // Node validation already done earlier
-                
+
                 println!("* Enabled nodes: {}", node_ids.join(", "));
                 let nodes: HashSet<Arc<str>> = node_ids
                     .iter()
@@ -185,7 +186,9 @@ impl QuicSimulation {
             use in_memory_network::schc_compressor::SchcCompressor;
             use std::collections::HashSet;
 
-            let rules_path = quic_options.schc_rules.as_ref()
+            let rules_path = quic_options
+                .schc_rules
+                .as_ref()
                 .context("--schc-rules required when --schc-compress is enabled")?;
 
             println!("--- SCHC Compressor ---");
@@ -196,7 +199,6 @@ impl QuicSimulation {
                 rules_path.to_str().unwrap(),
                 "", // Field context no longer needed
                 quic_options.schc_debug,
-                quic_options.schc_dynamic_quic_rules,
             )?);
 
             // Set the compressor on the network
@@ -205,17 +207,19 @@ impl QuicSimulation {
             // Configure compression nodes if specified
             if let Some(ref node_ids) = quic_options.schc_compress_nodes {
                 // Validate nodes exist
-                let available_node_ids: Vec<&str> = network_spec_for_validation.nodes.iter()
+                let available_node_ids: Vec<&str> = network_spec_for_validation
+                    .nodes
+                    .iter()
                     .map(|n| n.id.as_str())
                     .collect();
-                
+
                 let mut invalid_nodes = Vec::new();
                 for node_id in node_ids {
                     if !available_node_ids.contains(&node_id.as_str()) {
                         invalid_nodes.push(node_id.as_str());
                     }
                 }
-                
+
                 if !invalid_nodes.is_empty() {
                     bail!(
                         "Invalid SCHC compress node(s) specified: [{}]\n\
@@ -224,7 +228,7 @@ impl QuicSimulation {
                         available_node_ids.join(", ")
                     );
                 }
-                
+
                 println!("* Compression nodes: {}", node_ids.join(", "));
                 let nodes: HashSet<Arc<str>> = node_ids
                     .iter()
